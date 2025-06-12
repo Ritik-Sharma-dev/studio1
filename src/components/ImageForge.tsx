@@ -19,7 +19,7 @@ import {
   Sparkles,
   Upload,
   Paintbrush,
-  RotateCw, // For Rotate +90
+  RotateCw, 
   FlipHorizontal,
   FlipVertical,
   Crop,
@@ -98,7 +98,6 @@ export default function ImageForge() {
       canvas.height = img.naturalHeight;
       ctx.filter = `brightness(${currentBrightness}%) contrast(${currentContrast}%) saturate(${currentSaturation}%)`;
       ctx.drawImage(img, 0, 0);
-      // No longer pushing to history here, only on explicit actions.
     };
     img.src = imageToDrawUrl;
   };
@@ -108,21 +107,18 @@ export default function ImageForge() {
     if (isManualEditingOpen && manualEditHistory[manualEditHistoryIndex]) {
       drawImageOnCanvas(manualEditHistory[manualEditHistoryIndex], brightness, contrast, saturation);
     }
-  }, [brightness, contrast, saturation, isManualEditingOpen, manualEditHistoryIndex]); // Removed imageForManualEdit, manualEditHistory to avoid loop
+  }, [brightness, contrast, saturation, isManualEditingOpen, manualEditHistory, manualEditHistoryIndex]);
 
 
   useEffect(() => {
     if (isManualEditingOpen && imageForManualEdit && manualEditHistory.length === 0) {
-        // Initialize history if sheet is opened and history is empty
         setManualEditHistory([imageForManualEdit]);
         setManualEditHistoryIndex(0);
-        // Draw initial image without re-triggering this effect if not needed
-        drawImageOnCanvas(imageForManualEdit, brightness, contrast, saturation);
+        drawImageOnCanvas(imageForManualEdit, 100, 100, 100); // Draw with default filters initially
     } else if (isManualEditingOpen && manualEditHistory[manualEditHistoryIndex]) {
-        // This will redraw based on history state, applying current slider values
         drawImageOnCanvas(manualEditHistory[manualEditHistoryIndex], brightness, contrast, saturation);
     }
-  }, [isManualEditingOpen, imageForManualEdit]);
+  }, [isManualEditingOpen, imageForManualEdit]); // Removed manualEditHistory from deps to avoid potential loops on its modification
 
 
   const handleGenerateImage = async () => {
@@ -197,7 +193,6 @@ export default function ImageForge() {
       return;
     }
     setImageForManualEdit(imageUrl);
-    // Initialize history and draw when sheet opens (handled by useEffect)
     setManualEditHistory([imageUrl]);
     setManualEditHistoryIndex(0);
     setBrightness(100);
@@ -270,17 +265,13 @@ export default function ImageForge() {
     setImageUrl(null);
     setError(null);
     setIsUploadedImage(false);
-    // Reset manual edit states too if needed, or handle separately
-    // setIsManualEditingOpen(false); 
-    // setManualEditHistory([]);
-    // setManualEditHistoryIndex(-1);
   };
 
   const handleHistoryImageClick = (histImageUrl: string) => {
     setImageUrl(histImageUrl);
     setEditPrompt('');
     setError(null);
-    setIsUploadedImage(histImageUrl.startsWith('data:image/') && !imageHistory.includes(histImageUrl));
+    setIsUploadedImage(histImageUrl.startsWith('data:image/') && !imageHistory.some(item => item === histImageUrl && !item.startsWith('blob:'))); // A bit of a heuristic
   };
 
   // Manual Edit Action Handlers
@@ -292,7 +283,6 @@ export default function ImageForge() {
 
     const img = new window.Image();
     img.onload = () => {
-        // Create a temporary canvas to draw the image with filters applied
         const tempCanvas = document.createElement('canvas');
         const tempCtx = tempCanvas.getContext('2d');
         if (!tempCtx) return;
@@ -302,16 +292,33 @@ export default function ImageForge() {
         tempCtx.filter = `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%)`;
         tempCtx.drawImage(img, 0, 0);
         
-        // Now use the content of tempCanvas (which has filters baked in) for transformation
         const filteredImage = new window.Image();
         filteredImage.onload = () => {
-            canvas.width = filteredImage.naturalWidth; // May change due to rotation
-            canvas.height = filteredImage.naturalHeight; // May change due to rotation
-            ctx.clearRect(0,0,canvas.width, canvas.height); // Clear canvas before transform
-            ctx.filter = 'none'; // Filters already baked in
-            transformation(ctx, canvas, filteredImage); // Apply transformation
+            // Determine new canvas dimensions BEFORE drawing for rotations
+            let newWidth = filteredImage.naturalWidth;
+            let newHeight = filteredImage.naturalHeight;
+            if (transformation.name.includes("handleRotate")) { // Check if it's a rotation
+                 const imgForDim = new window.Image();
+                 imgForDim.src = currentImageFromHistory; // Use original for dimension check pre-filter
+                 if (Math.abs(parseFloat(transformation.name.split("handleRotate")[1] || "0")) === 90) { // A bit hacky way to check degrees
+                    newWidth = imgForDim.naturalHeight;
+                    newHeight = imgForDim.naturalWidth;
+                 } else {
+                    newWidth = imgForDim.naturalWidth;
+                    newHeight = imgForDim.naturalHeight;
+                 }
+            } else {
+                 newWidth = filteredImage.naturalWidth;
+                 newHeight = filteredImage.naturalHeight;
+            }
+
+            canvas.width = newWidth;
+            canvas.height = newHeight;
+            
+            ctx.clearRect(0,0,canvas.width, canvas.height); 
+            ctx.filter = 'none'; 
+            transformation(ctx, canvas, filteredImage); 
             pushToManualEditHistory(canvas.toDataURL());
-            // No need to call drawImageOnCanvas here as pushToManualEditHistory + useEffect will handle it
         }
         filteredImage.src = tempCanvas.toDataURL();
     };
@@ -320,24 +327,24 @@ export default function ImageForge() {
 
 
   const handleRotate = (degrees: number) => {
-    applyCanvasTransformation((ctx, canvas, img) => {
+    const rotateTransformation = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, img: HTMLImageElement) => {
       const rad = degrees * Math.PI / 180;
-      if (degrees === 90 || degrees === -90) { // Or 270
-        canvas.width = img.height;
-        canvas.height = img.width;
-      } else {
-        canvas.width = img.width;
-        canvas.height = img.height;
-      }
+      // Canvas dimensions are already set by applyCanvasTransformation based on rotated image dimensions
       ctx.translate(canvas.width / 2, canvas.height / 2);
       ctx.rotate(rad);
-      ctx.drawImage(img, -img.width / 2, -img.height / 2);
-    });
+      if (Math.abs(degrees) === 90){
+        ctx.drawImage(img, -img.height / 2, -img.width / 2, img.height, img.width);
+      } else {
+        ctx.drawImage(img, -img.width / 2, -img.height / 2, img.width, img.height);
+      }
+    };
+    Object.defineProperty(rotateTransformation, 'name', { value: `handleRotate${degrees}` }); // For dimension check hack
+    applyCanvasTransformation(rotateTransformation);
   };
 
   const handleFlip = (direction: 'horizontal' | 'vertical') => {
     applyCanvasTransformation((ctx, canvas, img) => {
-      canvas.width = img.width;
+      canvas.width = img.width; // Flipping doesn't change dimensions
       canvas.height = img.height;
       if (direction === 'horizontal') {
         ctx.translate(canvas.width, 0);
@@ -357,21 +364,18 @@ export default function ImageForge() {
   const handleUndo = () => {
     if (manualEditHistoryIndex > 0) {
       setManualEditHistoryIndex(prev => prev - 1);
-      // Effect will redraw
     }
   };
 
   const handleRedo = () => {
     if (manualEditHistoryIndex < manualEditHistory.length - 1) {
       setManualEditHistoryIndex(prev => prev + 1);
-      // Effect will redraw
     }
   };
 
   const handleApplyManualChanges = () => {
     const canvas = canvasRef.current;
     if (canvas && manualEditHistory[manualEditHistoryIndex]) {
-        // Draw the current history state with current filters to ensure they are applied
         const finalImage = new window.Image();
         finalImage.onload = () => {
             const tempCanvas = document.createElement('canvas');
@@ -390,13 +394,12 @@ export default function ImageForge() {
         finalImage.src = manualEditHistory[manualEditHistoryIndex];
 
     } else {
-       setIsManualEditingOpen(false); // Close even if no changes or error
+       setIsManualEditingOpen(false); 
     }
   };
 
   const handleCancelManualChanges = () => {
     setIsManualEditingOpen(false);
-    // Don't revert imageUrl, just close the sheet
   };
 
 
@@ -570,7 +573,7 @@ export default function ImageForge() {
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                 {imageHistory.map((histImg, index) => (
                   <button
-                    key={index}
+                    key={histImg}
                     onClick={() => handleHistoryImageClick(histImg)}
                     className="aspect-square rounded-lg overflow-hidden border-2 border-transparent hover:border-primary focus:border-primary focus:outline-none shadow-md hover:shadow-lg transition-all duration-200 relative group"
                     aria-label={`Load image ${index + 1} from history`}
