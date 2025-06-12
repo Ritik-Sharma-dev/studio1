@@ -8,7 +8,24 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Download, RotateCcw, AlertCircle, Image as ImageIcon, Loader2, Sparkles, Upload, Paintbrush } from 'lucide-react';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter, SheetClose } from '@/components/ui/sheet';
+import { Slider } from "@/components/ui/slider";
+import {
+  Download,
+  RotateCcw,
+  AlertCircle,
+  Image as ImageIcon,
+  Loader2,
+  Sparkles,
+  Upload,
+  Paintbrush,
+  RotateCw, // For Rotate +90
+  FlipHorizontal,
+  FlipVertical,
+  Crop,
+  Undo,
+  Redo,
+} from 'lucide-react';
 import { generateImage } from '@/ai/flows/generate-image';
 import { editImage } from '@/ai/flows/edit-image';
 import { useToast } from "@/hooks/use-toast";
@@ -20,7 +37,7 @@ const VisionaryLogo = () => (
     viewBox="0 0 24 24"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
-    className="text-primary" // Inherits primary color
+    className="text-primary"
   >
     <path d="M12 2L9.17157 4.82843L6.34315 2L4.82843 4.82843L2 6.34315L4.82843 9.17157L2 12L4.82843 14.8284L2 17.6569L4.82843 19.1716L6.34315 22L9.17157 19.1716L12 22L14.8284 19.1716L17.6569 22L19.1716 19.1716L22 17.6569L19.1716 14.8284L22 12L19.1716 9.17157L22 6.34315L19.1716 4.82843L17.6569 2L14.8284 4.82843L12 2Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
     <circle cx="12" cy="12" r="3" fill="currentColor"/>
@@ -40,6 +57,73 @@ export default function ImageForge() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
+  // Manual Edit State
+  const [isManualEditingOpen, setIsManualEditingOpen] = useState(false);
+  const [imageForManualEdit, setImageForManualEdit] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [brightness, setBrightness] = useState(100); // 0-200, 100 is default
+  const [contrast, setContrast] = useState(100);   // 0-200, 100 is default
+  const [saturation, setSaturation] = useState(100); // 0-200, 100 is default
+  const [manualEditHistory, setManualEditHistory] = useState<string[]>([]);
+  const [manualEditHistoryIndex, setManualEditHistoryIndex] = useState(-1);
+
+
+  const updateImageHistory = (newImageUrl: string) => {
+    setImageHistory(prevHistory => {
+      const updatedHistory = [newImageUrl, ...prevHistory.filter(url => url !== newImageUrl)];
+      return updatedHistory.slice(0, 5);
+    });
+  };
+
+  const pushToManualEditHistory = (dataUrl: string) => {
+    const newHistory = manualEditHistory.slice(0, manualEditHistoryIndex + 1);
+    newHistory.push(dataUrl);
+    setManualEditHistory(newHistory);
+    setManualEditHistoryIndex(newHistory.length - 1);
+  };
+
+  const drawImageOnCanvas = (
+    imageToDrawUrl: string | null = imageForManualEdit,
+    currentBrightness = brightness,
+    currentContrast = contrast,
+    currentSaturation = saturation
+  ) => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!ctx || !canvas || !imageToDrawUrl) return;
+
+    const img = new window.Image();
+    img.onload = () => {
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      ctx.filter = `brightness(${currentBrightness}%) contrast(${currentContrast}%) saturate(${currentSaturation}%)`;
+      ctx.drawImage(img, 0, 0);
+      // No longer pushing to history here, only on explicit actions.
+    };
+    img.src = imageToDrawUrl;
+  };
+
+
+  useEffect(() => {
+    if (isManualEditingOpen && manualEditHistory[manualEditHistoryIndex]) {
+      drawImageOnCanvas(manualEditHistory[manualEditHistoryIndex], brightness, contrast, saturation);
+    }
+  }, [brightness, contrast, saturation, isManualEditingOpen, manualEditHistoryIndex]); // Removed imageForManualEdit, manualEditHistory to avoid loop
+
+
+  useEffect(() => {
+    if (isManualEditingOpen && imageForManualEdit && manualEditHistory.length === 0) {
+        // Initialize history if sheet is opened and history is empty
+        setManualEditHistory([imageForManualEdit]);
+        setManualEditHistoryIndex(0);
+        // Draw initial image without re-triggering this effect if not needed
+        drawImageOnCanvas(imageForManualEdit, brightness, contrast, saturation);
+    } else if (isManualEditingOpen && manualEditHistory[manualEditHistoryIndex]) {
+        // This will redraw based on history state, applying current slider values
+        drawImageOnCanvas(manualEditHistory[manualEditHistoryIndex], brightness, contrast, saturation);
+    }
+  }, [isManualEditingOpen, imageForManualEdit]);
+
 
   const handleGenerateImage = async () => {
     if (!prompt.trim()) {
@@ -56,7 +140,7 @@ export default function ImageForge() {
       const result = await generateImage({ prompt });
       setImageUrl(result.imageUrl);
       updateImageHistory(result.imageUrl);
-      setEditPrompt(''); 
+      setEditPrompt('');
     } catch (e) {
       console.error(e);
       setError('Could not generate image. Please try again or refine your prompt.');
@@ -88,7 +172,7 @@ export default function ImageForge() {
       const result = await editImage({ existingImageDataUri: imageUrl, newPrompt: editPrompt });
       setImageUrl(result.editedImageDataUri);
       updateImageHistory(result.editedImageDataUri);
-      setIsUploadedImage(false); // After editing, it's a "generated" variant
+      setIsUploadedImage(false);
     } catch (e) {
       console.error(e);
       setError('Could not edit image. Please try again or refine your edit prompt.');
@@ -104,10 +188,22 @@ export default function ImageForge() {
   };
 
   const handleManualEdit = () => {
-    toast({
-      title: "Manual Edit",
-      description: "This feature is coming soon! For now, please use AI-powered editing.",
-    });
+    if (!imageUrl) {
+      toast({
+        variant: 'destructive',
+        title: 'No Image',
+        description: 'Please generate or upload an image first to manually edit.',
+      });
+      return;
+    }
+    setImageForManualEdit(imageUrl);
+    // Initialize history and draw when sheet opens (handled by useEffect)
+    setManualEditHistory([imageUrl]);
+    setManualEditHistoryIndex(0);
+    setBrightness(100);
+    setContrast(100);
+    setSaturation(100);
+    setIsManualEditingOpen(true);
   };
 
   const handleUploadButtonClick = () => {
@@ -133,7 +229,7 @@ export default function ImageForge() {
         updateImageHistory(dataUri);
         setEditPrompt('');
         setError(null);
-        setPrompt(''); // Clear generation prompt as we've uploaded an image
+        setPrompt('');
         setIsUploadedImage(true);
         toast({
           title: "Image Uploaded",
@@ -150,29 +246,19 @@ export default function ImageForge() {
       };
       reader.readAsDataURL(file);
     }
-     // Reset file input to allow uploading the same file again
     if (event.target) {
       event.target.value = '';
     }
-  };
-
-  const updateImageHistory = (newImageUrl: string) => {
-    setImageHistory(prevHistory => {
-      const updatedHistory = [newImageUrl, ...prevHistory.filter(url => url !== newImageUrl)];
-      return updatedHistory.slice(0, 5); 
-    });
   };
 
   const handleDownloadImage = () => {
     if (!imageUrl) return;
     const link = document.createElement('a');
     link.href = imageUrl;
-    
     const safePrompt = prompt || editPrompt || 'visionary_image';
     const filename = safePrompt.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 30);
     const extension = imageUrl.startsWith('data:image/') ? imageUrl.substring(imageUrl.indexOf('/') + 1, imageUrl.indexOf(';')) : 'png';
     link.download = `${filename || 'visionary_image'}.${extension}`;
-    
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -184,16 +270,135 @@ export default function ImageForge() {
     setImageUrl(null);
     setError(null);
     setIsUploadedImage(false);
+    // Reset manual edit states too if needed, or handle separately
+    // setIsManualEditingOpen(false); 
+    // setManualEditHistory([]);
+    // setManualEditHistoryIndex(-1);
   };
 
   const handleHistoryImageClick = (histImageUrl: string) => {
     setImageUrl(histImageUrl);
-    setEditPrompt(''); 
+    setEditPrompt('');
     setError(null);
-    // Determine if the history image was an upload. This is a simplification.
-    // A more robust way would be to store metadata with history items.
     setIsUploadedImage(histImageUrl.startsWith('data:image/') && !imageHistory.includes(histImageUrl));
   };
+
+  // Manual Edit Action Handlers
+  const applyCanvasTransformation = (transformation: (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, img: HTMLImageElement) => void) => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    const currentImageFromHistory = manualEditHistory[manualEditHistoryIndex];
+    if (!ctx || !canvas || !currentImageFromHistory) return;
+
+    const img = new window.Image();
+    img.onload = () => {
+        // Create a temporary canvas to draw the image with filters applied
+        const tempCanvas = document.createElement('canvas');
+        const tempCtx = tempCanvas.getContext('2d');
+        if (!tempCtx) return;
+
+        tempCanvas.width = img.naturalWidth;
+        tempCanvas.height = img.naturalHeight;
+        tempCtx.filter = `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%)`;
+        tempCtx.drawImage(img, 0, 0);
+        
+        // Now use the content of tempCanvas (which has filters baked in) for transformation
+        const filteredImage = new window.Image();
+        filteredImage.onload = () => {
+            canvas.width = filteredImage.naturalWidth; // May change due to rotation
+            canvas.height = filteredImage.naturalHeight; // May change due to rotation
+            ctx.clearRect(0,0,canvas.width, canvas.height); // Clear canvas before transform
+            ctx.filter = 'none'; // Filters already baked in
+            transformation(ctx, canvas, filteredImage); // Apply transformation
+            pushToManualEditHistory(canvas.toDataURL());
+            // No need to call drawImageOnCanvas here as pushToManualEditHistory + useEffect will handle it
+        }
+        filteredImage.src = tempCanvas.toDataURL();
+    };
+    img.src = currentImageFromHistory;
+  };
+
+
+  const handleRotate = (degrees: number) => {
+    applyCanvasTransformation((ctx, canvas, img) => {
+      const rad = degrees * Math.PI / 180;
+      if (degrees === 90 || degrees === -90) { // Or 270
+        canvas.width = img.height;
+        canvas.height = img.width;
+      } else {
+        canvas.width = img.width;
+        canvas.height = img.height;
+      }
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(rad);
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+    });
+  };
+
+  const handleFlip = (direction: 'horizontal' | 'vertical') => {
+    applyCanvasTransformation((ctx, canvas, img) => {
+      canvas.width = img.width;
+      canvas.height = img.height;
+      if (direction === 'horizontal') {
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+      } else {
+        ctx.translate(0, canvas.height);
+        ctx.scale(1, -1);
+      }
+      ctx.drawImage(img, 0, 0);
+    });
+  };
+
+  const handleCrop = () => {
+    toast({ title: "Crop Tool", description: "Interactive cropping is coming soon!" });
+  };
+
+  const handleUndo = () => {
+    if (manualEditHistoryIndex > 0) {
+      setManualEditHistoryIndex(prev => prev - 1);
+      // Effect will redraw
+    }
+  };
+
+  const handleRedo = () => {
+    if (manualEditHistoryIndex < manualEditHistory.length - 1) {
+      setManualEditHistoryIndex(prev => prev + 1);
+      // Effect will redraw
+    }
+  };
+
+  const handleApplyManualChanges = () => {
+    const canvas = canvasRef.current;
+    if (canvas && manualEditHistory[manualEditHistoryIndex]) {
+        // Draw the current history state with current filters to ensure they are applied
+        const finalImage = new window.Image();
+        finalImage.onload = () => {
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            if(!tempCtx) return;
+            tempCanvas.width = finalImage.naturalWidth;
+            tempCanvas.height = finalImage.naturalHeight;
+            tempCtx.filter = `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%)`;
+            tempCtx.drawImage(finalImage, 0, 0);
+            
+            const finalDataUrl = tempCanvas.toDataURL();
+            setImageUrl(finalDataUrl);
+            updateImageHistory(finalDataUrl);
+            setIsManualEditingOpen(false);
+        }
+        finalImage.src = manualEditHistory[manualEditHistoryIndex];
+
+    } else {
+       setIsManualEditingOpen(false); // Close even if no changes or error
+    }
+  };
+
+  const handleCancelManualChanges = () => {
+    setIsManualEditingOpen(false);
+    // Don't revert imageUrl, just close the sheet
+  };
+
 
   return (
     <div className="min-h-screen flex flex-col items-center bg-background text-foreground py-8 sm:py-12 px-4">
@@ -229,9 +434,9 @@ export default function ImageForge() {
                   accept="image/*"
                   className="hidden"
                 />
-                <Button 
-                  onClick={handleUploadButtonClick} 
-                  disabled={isLoading} 
+                <Button
+                  onClick={handleUploadButtonClick}
+                  disabled={isLoading}
                   variant="outline"
                   className="w-full sm:w-auto text-base px-6 py-3 rounded-lg font-semibold"
                   size="lg"
@@ -239,9 +444,9 @@ export default function ImageForge() {
                   <Upload className="mr-2 h-5 w-5" />
                   Upload
                 </Button>
-                <Button 
-                  onClick={handleGenerateImage} 
-                  disabled={isLoading || !prompt.trim()} 
+                <Button
+                  onClick={handleGenerateImage}
+                  disabled={isLoading || !prompt.trim()}
                   className="w-full sm:w-auto text-base px-6 py-3 rounded-lg font-semibold"
                   size="lg"
                 >
@@ -252,11 +457,11 @@ export default function ImageForge() {
             </div>
           </CardContent>
         </Card>
-        
+
         {(isLoading || imageUrl || error) && (
           <Card className="shadow-2xl rounded-xl bg-card border-border/50">
             <CardContent className="p-4 sm:p-6 space-y-6">
-              <div 
+              <div
                 className="aspect-video w-full bg-muted/50 rounded-lg flex items-center justify-center overflow-hidden border border-border/30 shadow-inner relative"
               >
                 {isLoading && (
@@ -267,17 +472,17 @@ export default function ImageForge() {
                     </p>
                   </div>
                 )}
-                
+
                 {!isLoading && imageUrl && (
                   <NextImage
-                    key={imageUrl} 
+                    key={imageUrl}
                     src={imageUrl}
                     alt={isUploadedImage ? "Uploaded image" : (prompt || "Generated image")}
                     layout="fill"
                     objectFit="contain"
                     className="transition-opacity duration-500 ease-in-out"
                     onLoad={(e) => { (e.target as HTMLImageElement).style.opacity = '1'; }}
-                    style={{ opacity: 0 }} 
+                    style={{ opacity: 0 }}
                     data-ai-hint={isUploadedImage ? "uploaded image" : "generated art"}
                     unoptimized={imageUrl.startsWith('data:')}
                   />
@@ -290,14 +495,14 @@ export default function ImageForge() {
                     <p className="text-sm">Enter a prompt or upload an image to begin.</p>
                   </div>
                 )}
-                 {!isLoading && !imageUrl && error && ( 
+                 {!isLoading && !imageUrl && error && (
                   <div className="text-center text-muted-foreground p-6">
                     <ImageIcon size={60} className="mx-auto mb-4 opacity-30" />
                      <p className="text-lg">Image processing failed.</p>
                   </div>
                 )}
               </div>
-              
+
               {error && !isLoading && (
                 <Alert variant="destructive" className="mt-4 border-destructive/70 bg-destructive/10">
                   <AlertCircle className="h-5 w-5 text-destructive" />
@@ -305,7 +510,7 @@ export default function ImageForge() {
                   <AlertDescription>{error}</AlertDescription>
                 </Alert>
               )}
-              
+
               {imageUrl && !isLoading && (
                 <div className="space-y-4 border-t border-border/50 pt-6 mt-6">
                   <div>
@@ -320,9 +525,9 @@ export default function ImageForge() {
                         disabled={isLoading}
                         className="flex-grow text-base p-3 rounded-lg"
                       />
-                      <Button 
-                        onClick={handleEditImage} 
-                        disabled={isLoading || !editPrompt.trim()} 
+                      <Button
+                        onClick={handleEditImage}
+                        disabled={isLoading || !editPrompt.trim()}
                         variant="outline"
                         className="w-full sm:w-auto text-base px-6 py-3 rounded-lg font-semibold border-accent text-accent hover:bg-accent hover:text-accent-foreground"
                         size="lg"
@@ -330,9 +535,9 @@ export default function ImageForge() {
                         {isLoading && activeLoader === 'edit' ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Sparkles className="mr-2 h-5 w-5" />}
                         Apply AI Edit
                       </Button>
-                       <Button 
-                        onClick={handleManualEdit} 
-                        disabled={isLoading} 
+                       <Button
+                        onClick={handleManualEdit}
+                        disabled={isLoading || !imageUrl}
                         variant="outline"
                         className="w-full sm:w-auto text-base px-6 py-3 rounded-lg font-semibold"
                         size="lg"
@@ -356,7 +561,7 @@ export default function ImageForge() {
           </Card>
         )}
 
-        {imageHistory.length > 0 && (
+        {imageHistory.length > 0 && !isManualEditingOpen && (
           <Card className="shadow-2xl rounded-xl bg-card border-border/50">
             <CardHeader className="pb-4 pt-6">
               <CardTitle className="text-2xl text-center font-semibold">Recent Visions</CardTitle>
@@ -389,7 +594,65 @@ export default function ImageForge() {
           </Card>
         )}
       </div>
+
+      {/* Manual Editing Sheet */}
+      <Sheet open={isManualEditingOpen} onOpenChange={setIsManualEditingOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md md:max-w-lg lg:max-w-xl p-0 flex flex-col">
+          <SheetHeader className="p-4 border-b">
+            <SheetTitle>Manual Image Editor</SheetTitle>
+            <SheetDescription>
+              Make precise adjustments to your image. Changes are applied to the canvas.
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="flex-grow overflow-y-auto p-4 space-y-6">
+            <div className="aspect-video w-full bg-muted rounded-md flex items-center justify-center overflow-hidden border">
+              <canvas ref={canvasRef} className="max-w-full max-h-full object-contain" />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="font-semibold">Transform</Label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <Button variant="outline" onClick={() => handleRotate(-90)}><RotateCcw className="mr-2 h-4 w-4" /> Rotate -90°</Button>
+                <Button variant="outline" onClick={() => handleRotate(90)}><RotateCw className="mr-2 h-4 w-4" /> Rotate +90°</Button>
+                <Button variant="outline" onClick={() => handleFlip('horizontal')}><FlipHorizontal className="mr-2 h-4 w-4" /> Flip H</Button>
+                <Button variant="outline" onClick={() => handleFlip('vertical')}><FlipVertical className="mr-2 h-4 w-4" /> Flip V</Button>
+                <Button variant="outline" onClick={handleCrop}><Crop className="mr-2 h-4 w-4" /> Crop</Button>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <Label className="font-semibold">Adjustments</Label>
+              <div className="space-y-2">
+                <Label htmlFor="brightness">Brightness: {brightness}%</Label>
+                <Slider id="brightness" value={[brightness]} min={0} max={200} step={1} onValueChange={(val) => setBrightness(val[0])} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="contrast">Contrast: {contrast}%</Label>
+                <Slider id="contrast" value={[contrast]} min={0} max={200} step={1} onValueChange={(val) => setContrast(val[0])} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="saturation">Saturation: {saturation}%</Label>
+                <Slider id="saturation" value={[saturation]} min={0} max={200} step={1} onValueChange={(val) => setSaturation(val[0])} />
+              </div>
+            </div>
+             <div className="space-y-2">
+                <Label className="font-semibold">History</Label>
+                <div className="flex gap-2">
+                    <Button variant="outline" onClick={handleUndo} disabled={manualEditHistoryIndex <= 0}><Undo className="mr-2 h-4 w-4" /> Undo</Button>
+                    <Button variant="outline" onClick={handleRedo} disabled={manualEditHistoryIndex >= manualEditHistory.length - 1}><Redo className="mr-2 h-4 w-4" /> Redo</Button>
+                </div>
+            </div>
+          </div>
+
+          <SheetFooter className="p-4 border-t mt-auto">
+            <SheetClose asChild>
+              <Button variant="outline" onClick={handleCancelManualChanges}>Cancel</Button>
+            </SheetClose>
+            <Button onClick={handleApplyManualChanges}>Apply Changes</Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
-
