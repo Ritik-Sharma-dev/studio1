@@ -1,16 +1,17 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import NextImage from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Download, RotateCcw, AlertCircle, Image as ImageIcon, Loader2, Sparkles } from 'lucide-react';
+import { Download, RotateCcw, AlertCircle, Image as ImageIcon, Loader2, Sparkles, Upload } from 'lucide-react';
 import { generateImage } from '@/ai/flows/generate-image';
 import { editImage } from '@/ai/flows/edit-image';
+import { useToast } from "@/hooks/use-toast";
 
 const VisionaryLogo = () => (
   <svg
@@ -31,10 +32,13 @@ export default function ImageForge() {
   const [prompt, setPrompt] = useState<string>('');
   const [editPrompt, setEditPrompt] = useState<string>('');
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [isUploadedImage, setIsUploadedImage] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [imageHistory, setImageHistory] = useState<string[]>([]);
   const [activeLoader, setActiveLoader] = useState<'generate' | 'edit' | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
 
 
   const handleGenerateImage = async () => {
@@ -46,15 +50,21 @@ export default function ImageForge() {
     setActiveLoader('generate');
     setError(null);
     setImageUrl(null);
+    setIsUploadedImage(false);
 
     try {
       const result = await generateImage({ prompt });
       setImageUrl(result.imageUrl);
       updateImageHistory(result.imageUrl);
-      setEditPrompt(''); // Clear edit prompt after new generation
+      setEditPrompt(''); 
     } catch (e) {
       console.error(e);
       setError('Could not generate image. Please try again or refine your prompt.');
+      toast({
+        variant: "destructive",
+        title: "Generation Failed",
+        description: "An error occurred while generating the image.",
+      });
     } finally {
       setIsLoading(false);
       setActiveLoader(null);
@@ -67,7 +77,7 @@ export default function ImageForge() {
       return;
     }
     if (!imageUrl) {
-      setError('No image to edit. Please generate an image first.');
+      setError('No image to edit. Please generate or upload an image first.');
       return;
     }
     setIsLoading(true);
@@ -78,19 +88,71 @@ export default function ImageForge() {
       const result = await editImage({ existingImageDataUri: imageUrl, newPrompt: editPrompt });
       setImageUrl(result.editedImageDataUri);
       updateImageHistory(result.editedImageDataUri);
+      setIsUploadedImage(false); // After editing, it's a "generated" variant
     } catch (e) {
       console.error(e);
       setError('Could not edit image. Please try again or refine your edit prompt.');
+      toast({
+        variant: "destructive",
+        title: "Editing Failed",
+        description: "An error occurred while editing the image.",
+      });
     } finally {
       setIsLoading(false);
       setActiveLoader(null);
     }
   };
 
+  const handleUploadButtonClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (!file.type.startsWith('image/')) {
+        setError('Invalid file type. Please upload an image.');
+        toast({
+          variant: "destructive",
+          title: "Upload Failed",
+          description: "Please select a valid image file (e.g., PNG, JPG).",
+        });
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUri = e.target?.result as string;
+        setImageUrl(dataUri);
+        updateImageHistory(dataUri);
+        setEditPrompt('');
+        setError(null);
+        setPrompt(''); // Clear generation prompt as we've uploaded an image
+        setIsUploadedImage(true);
+        toast({
+          title: "Image Uploaded",
+          description: "Your image is ready to be edited.",
+        });
+      };
+      reader.onerror = () => {
+        setError('Failed to read the uploaded file.');
+        toast({
+          variant: "destructive",
+          title: "Upload Failed",
+          description: "There was an error reading your image file.",
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+     // Reset file input to allow uploading the same file again
+    if (event.target) {
+      event.target.value = '';
+    }
+  };
+
   const updateImageHistory = (newImageUrl: string) => {
     setImageHistory(prevHistory => {
       const updatedHistory = [newImageUrl, ...prevHistory.filter(url => url !== newImageUrl)];
-      return updatedHistory.slice(0, 5); // Show up to 5 history items
+      return updatedHistory.slice(0, 5); 
     });
   };
 
@@ -102,7 +164,7 @@ export default function ImageForge() {
     const safePrompt = prompt || editPrompt || 'visionary_image';
     const filename = safePrompt.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 30);
     const extension = imageUrl.startsWith('data:image/') ? imageUrl.substring(imageUrl.indexOf('/') + 1, imageUrl.indexOf(';')) : 'png';
-    link.download = `${filename || 'generated_image'}.${extension}`;
+    link.download = `${filename || 'visionary_image'}.${extension}`;
     
     document.body.appendChild(link);
     link.click();
@@ -114,13 +176,16 @@ export default function ImageForge() {
     setEditPrompt('');
     setImageUrl(null);
     setError(null);
-    // Retain image history as per spec
+    setIsUploadedImage(false);
   };
 
   const handleHistoryImageClick = (histImageUrl: string) => {
     setImageUrl(histImageUrl);
-    setEditPrompt(''); // Clear edit prompt when loading from history
+    setEditPrompt(''); 
     setError(null);
+    // Determine if the history image was an upload. This is a simplification.
+    // A more robust way would be to store metadata with history items.
+    setIsUploadedImage(histImageUrl.startsWith('data:image/') && !imageHistory.includes(histImageUrl));
   };
 
   return (
@@ -131,7 +196,7 @@ export default function ImageForge() {
           Visionary
         </h1>
         <p className="text-md sm:text-lg text-muted-foreground max-w-md">
-          Bring your ideas to life. Describe anything, and watch AI create it.
+          Bring your ideas to life. Describe, upload, and watch AI create or transform.
         </p>
       </header>
 
@@ -139,17 +204,34 @@ export default function ImageForge() {
         <Card className="shadow-2xl rounded-xl bg-card border-border/50">
           <CardContent className="p-6 space-y-4">
             <div>
-              <Label htmlFor="prompt" className="text-lg font-semibold mb-2 block">Enter your vision</Label>
+              <Label htmlFor="prompt" className="text-lg font-semibold mb-2 block">Enter your vision or Upload</Label>
               <div className="flex flex-col sm:flex-row gap-3">
                 <Input
                   id="prompt"
                   type="text"
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="e.g., A futuristic cityscape at sunset, synthwave style"
+                  placeholder="e.g., A futuristic cityscape at sunset..."
                   disabled={isLoading}
                   className="flex-grow text-base p-3 rounded-lg"
                 />
+                 <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileSelected}
+                  accept="image/*"
+                  className="hidden"
+                />
+                <Button 
+                  onClick={handleUploadButtonClick} 
+                  disabled={isLoading} 
+                  variant="outline"
+                  className="w-full sm:w-auto text-base px-6 py-3 rounded-lg font-semibold"
+                  size="lg"
+                >
+                  <Upload className="mr-2 h-5 w-5" />
+                  Upload
+                </Button>
                 <Button 
                   onClick={handleGenerateImage} 
                   disabled={isLoading || !prompt.trim()} 
@@ -183,13 +265,13 @@ export default function ImageForge() {
                   <NextImage
                     key={imageUrl} 
                     src={imageUrl}
-                    alt={prompt || "Generated image"}
+                    alt={isUploadedImage ? "Uploaded image" : (prompt || "Generated image")}
                     layout="fill"
                     objectFit="contain"
                     className="transition-opacity duration-500 ease-in-out"
                     onLoad={(e) => { (e.target as HTMLImageElement).style.opacity = '1'; }}
                     style={{ opacity: 0 }} 
-                    data-ai-hint="generated art"
+                    data-ai-hint={isUploadedImage ? "uploaded image" : "generated art"}
                     unoptimized={imageUrl.startsWith('data:')}
                   />
                 )}
@@ -198,13 +280,13 @@ export default function ImageForge() {
                   <div className="text-center text-muted-foreground p-6">
                     <ImageIcon size={60} className="mx-auto mb-4 opacity-50" />
                     <p className="text-lg">Your masterpiece will appear here.</p>
-                    <p className="text-sm">Enter a prompt above to begin.</p>
+                    <p className="text-sm">Enter a prompt or upload an image to begin.</p>
                   </div>
                 )}
-                 {!isLoading && !imageUrl && error && ( // Show placeholder if error and no image
+                 {!isLoading && !imageUrl && error && ( 
                   <div className="text-center text-muted-foreground p-6">
                     <ImageIcon size={60} className="mx-auto mb-4 opacity-30" />
-                     <p className="text-lg">Image generation failed.</p>
+                     <p className="text-lg">Image processing failed.</p>
                   </div>
                 )}
               </div>
@@ -293,3 +375,4 @@ export default function ImageForge() {
     </div>
   );
 }
+
