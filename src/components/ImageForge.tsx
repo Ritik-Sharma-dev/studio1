@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Download, RotateCcw, AlertCircle, Image as ImageIcon, Loader2, Sparkles, Upload } from 'lucide-react';
+import { Download, RotateCcw, AlertCircle, Image as ImageIcon, Loader2, Sparkles, Upload, Paintbrush } from 'lucide-react';
 import { generateImage } from '@/ai/flows/generate-image';
 import { editImage } from '@/ai/flows/edit-image';
 import { useToast } from "@/hooks/use-toast";
@@ -101,6 +101,13 @@ export default function ImageForge() {
       setIsLoading(false);
       setActiveLoader(null);
     }
+  };
+
+  const handleManualEdit = () => {
+    toast({
+      title: "Manual Edit",
+      description: "This feature is coming soon! For now, please use AI-powered editing.",
+    });
   };
 
   const handleUploadButtonClick = () => {
@@ -302,7 +309,7 @@ export default function ImageForge() {
               {imageUrl && !isLoading && (
                 <div className="space-y-4 border-t border-border/50 pt-6 mt-6">
                   <div>
-                    <Label htmlFor="editPrompt" className="text-lg font-semibold mb-2 block">Refine your image</Label>
+                    <Label htmlFor="editPrompt" className="text-lg font-semibold mb-2 block">Refine your image (AI)</Label>
                     <div className="flex flex-col sm:flex-row gap-3">
                       <Input
                         id="editPrompt"
@@ -320,8 +327,18 @@ export default function ImageForge() {
                         className="w-full sm:w-auto text-base px-6 py-3 rounded-lg font-semibold border-accent text-accent hover:bg-accent hover:text-accent-foreground"
                         size="lg"
                       >
-                        {isLoading && activeLoader === 'edit' ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : null}
-                        Apply Edit
+                        {isLoading && activeLoader === 'edit' ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Sparkles className="mr-2 h-5 w-5" />}
+                        Apply AI Edit
+                      </Button>
+                       <Button 
+                        onClick={handleManualEdit} 
+                        disabled={isLoading} 
+                        variant="outline"
+                        className="w-full sm:w-auto text-base px-6 py-3 rounded-lg font-semibold"
+                        size="lg"
+                      >
+                        <Paintbrush className="mr-2 h-5 w-5" />
+                        Manual Edit
                       </Button>
                     </div>
                   </div>
