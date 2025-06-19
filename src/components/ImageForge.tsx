@@ -25,7 +25,7 @@ import {
   Crop,
   Undo,
   Redo,
-  History as HistoryIcon, // Added HistoryIcon
+  History as HistoryIcon,
 } from 'lucide-react';
 import { generateImage } from '@/ai/flows/generate-image';
 import { editImage } from '@/ai/flows/edit-image';
@@ -46,6 +46,7 @@ const VisionaryLogo = () => (
 );
 
 const LOCAL_STORAGE_HISTORY_KEY = 'visionaryAppImageHistory';
+const MAX_HISTORY_LENGTH = 10; // Limit the number of images in history
 
 export default function ImageForge() {
   const [prompt, setPrompt] = useState<string>('');
@@ -80,7 +81,7 @@ export default function ImageForge() {
       if (storedHistory) {
         const parsedHistory = JSON.parse(storedHistory);
         if (Array.isArray(parsedHistory)) {
-          setImageHistory(parsedHistory);
+          setImageHistory(parsedHistory.slice(0, MAX_HISTORY_LENGTH)); // Also cap on load
         }
       }
     } catch (e) {
@@ -96,17 +97,17 @@ export default function ImageForge() {
   // Save image history to localStorage whenever it changes
   useEffect(() => {
     try {
-      if (imageHistory.length > 0 || localStorage.getItem(LOCAL_STORAGE_HISTORY_KEY) !== null) {
-         localStorage.setItem(LOCAL_STORAGE_HISTORY_KEY, JSON.stringify(imageHistory));
-      }
+      localStorage.setItem(LOCAL_STORAGE_HISTORY_KEY, JSON.stringify(imageHistory));
     } catch (e) {
       console.error("Failed to save image history to localStorage", e);
-      // Consider a less intrusive way to notify or handle this if it becomes common
-      // For now, a toast is fine.
+      let description = "An error occurred while saving image history.";
+      if (e instanceof DOMException && e.name === 'QuotaExceededError') {
+        description = "Could not save to image history. Storage might be full. Try clearing some history or older items may have been removed.";
+      }
       toast({
         variant: "destructive",
         title: "History Save Failed",
-        description: "Could not save all images to local history. Storage might be full.",
+        description: description,
       });
     }
   }, [imageHistory, toast]);
@@ -114,8 +115,9 @@ export default function ImageForge() {
 
   const updateImageHistory = (newImageUrl: string) => {
     setImageHistory(prevHistory => {
-      const updatedHistory = [newImageUrl, ...prevHistory.filter(url => url !== newImageUrl)];
-      return updatedHistory;
+      const filteredHistory = prevHistory.filter(url => url !== newImageUrl);
+      const newHistory = [newImageUrl, ...filteredHistory];
+      return newHistory.slice(0, MAX_HISTORY_LENGTH);
     });
   };
 
@@ -247,7 +249,7 @@ export default function ImageForge() {
     setBrightness(100);
     setContrast(100);
     setSaturation(100);
-    setManualEditHistory([imageUrl]);
+    setManualEditHistory([imageUrl]); // Start manual edit history with current image
     setManualEditHistoryIndex(0);
     setIsManualEditingOpen(true);
   };
@@ -358,15 +360,15 @@ export default function ImageForge() {
             canvas.width = newCanvasWidth;
             canvas.height = newCanvasHeight;
             ctx.clearRect(0,0,canvas.width, canvas.height);
-            ctx.filter = 'none';
+            ctx.filter = 'none'; // Reset filter before transformation, it's baked into imageWithAdjustments
 
             transformation(ctx, canvas, imageWithAdjustments);
             pushToManualEditHistory(canvas.toDataURL());
         }
-        imageWithAdjustments.src = tempCanvas.toDataURL();
+        imageWithAdjustments.src = tempCanvas.toDataURL(); // This now includes adjustments
     };
     img.onerror = () => { console.error("Failed to load image for transformation"); }
-    img.src = currentImageFromHistory;
+    img.src = currentImageFromHistory; // Base image for transformation
   };
 
 
@@ -380,6 +382,8 @@ export default function ImageForge() {
       } else {
          ctx.drawImage(img, -img.width / 2, -img.height / 2, img.width, img.height);
       }
+       // Reset transform for next drawing operation if any
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
     };
     Object.defineProperty(rotateTransformation, 'name', { value: `handleRotate${degrees}` });
     applyCanvasTransformation(rotateTransformation);
@@ -395,6 +399,8 @@ export default function ImageForge() {
         ctx.scale(1, -1);
       }
       ctx.drawImage(img, 0, 0, img.width, img.height);
+      // Reset transform for next drawing operation if any
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
     };
     Object.defineProperty(flipTransformation, 'name', { value: `handleFlip${direction}` });
     applyCanvasTransformation(flipTransformation);
@@ -408,6 +414,7 @@ export default function ImageForge() {
     if (manualEditHistoryIndex > 0) {
       const newIndex = manualEditHistoryIndex - 1;
       setManualEditHistoryIndex(newIndex);
+      // Image will be redrawn by useEffect listening to manualEditHistoryIndex
     }
   };
 
@@ -415,6 +422,7 @@ export default function ImageForge() {
     if (manualEditHistoryIndex < manualEditHistory.length - 1) {
       const newIndex = manualEditHistoryIndex + 1;
       setManualEditHistoryIndex(newIndex);
+      // Image will be redrawn by useEffect listening to manualEditHistoryIndex
     }
   };
 
@@ -429,8 +437,8 @@ export default function ImageForge() {
             const tempCtx = tempCanvas.getContext('2d');
             if(!tempCtx) return;
 
-            tempCanvas.width = finalImage.naturalWidth;
-            tempCanvas.height = finalImage.naturalHeight;
+            tempCanvas.width = finalImage.naturalWidth; // Use naturalWidth of the base image for this step
+            tempCanvas.height = finalImage.naturalHeight; // Use naturalHeight
             tempCtx.filter = `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%)`;
             tempCtx.drawImage(finalImage, 0, 0);
 
@@ -440,7 +448,7 @@ export default function ImageForge() {
             setIsManualEditingOpen(false);
         }
         finalImage.onerror = () => { console.error("Error loading image for applying manual changes.")}
-        finalImage.src = imageToFinalize;
+        finalImage.src = imageToFinalize; // This is the (potentially transformed) image from history
     } else {
        setIsManualEditingOpen(false);
     }
@@ -448,9 +456,8 @@ export default function ImageForge() {
 
   const handleCancelManualChanges = () => {
     setIsManualEditingOpen(false);
-    setImageForManualEdit(null);
-    setManualEditHistory([]);
-    setManualEditHistoryIndex(-1);
+    // No need to reset imageForManualEdit, manualEditHistory, etc. here
+    // as they will be re-initialized if the sheet is opened again.
   };
 
 
@@ -529,14 +536,14 @@ export default function ImageForge() {
 
                 {!isLoading && imageUrl && (
                   <NextImage
-                    key={imageUrl}
+                    key={imageUrl} // Re-mount on imageUrl change for opacity transition
                     src={imageUrl}
                     alt={isUploadedImage ? "Uploaded image" : (prompt || editPrompt || "Generated image")}
                     layout="fill"
                     objectFit="contain"
                     className="transition-opacity duration-500 ease-in-out"
                     onLoad={(e) => { (e.target as HTMLImageElement).style.opacity = '1'; }}
-                    style={{ opacity: 0 }}
+                    style={{ opacity: 0 }} // Start with opacity 0 for fade-in
                     data-ai-hint={isUploadedImage ? "uploaded image" : (prompt ? "generated art" : "edited art")}
                     unoptimized={imageUrl.startsWith('data:')}
                   />
@@ -549,7 +556,7 @@ export default function ImageForge() {
                     <p className="text-sm">Enter a prompt or upload an image to begin.</p>
                   </div>
                 )}
-                 {!isLoading && !imageUrl && error && (
+                 {!isLoading && !imageUrl && error && ( // Show placeholder even if error
                   <div className="text-center text-muted-foreground p-6">
                     <ImageIcon size={60} className="mx-auto mb-4 opacity-30" />
                      <p className="text-lg">Image processing failed.</p>
@@ -591,7 +598,7 @@ export default function ImageForge() {
                       </Button>
                        <Button
                         onClick={handleManualEdit}
-                        disabled={isLoading || !imageUrl}
+                        disabled={isLoading || !imageUrl} // Disable if no image
                         variant="outline"
                         className="w-full sm:w-auto text-base px-6 py-3 rounded-lg font-semibold"
                         size="lg"
@@ -632,7 +639,7 @@ export default function ImageForge() {
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                     {imageHistory.map((histImg) => (
                       <button
-                        key={histImg}
+                        key={histImg} // Use the image data URI as key
                         onClick={() => handleHistoryImageClick(histImg)}
                         className="aspect-square rounded-lg overflow-hidden border-2 border-transparent hover:border-primary focus:border-primary focus:outline-none shadow-md hover:shadow-lg transition-all duration-200 relative group"
                         aria-label={`Load image from history`}
@@ -719,4 +726,3 @@ export default function ImageForge() {
     </div>
   );
 }
-
