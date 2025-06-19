@@ -46,7 +46,7 @@ const VisionaryLogo = () => (
 );
 
 const LOCAL_STORAGE_HISTORY_KEY = 'visionaryAppImageHistory';
-const MAX_HISTORY_LENGTH = 3; // Limit the number of images in history to reduce storage load
+const MAX_HISTORY_LENGTH = 3;
 
 export default function ImageForge() {
   const [prompt, setPrompt] = useState<string>('');
@@ -69,7 +69,7 @@ export default function ImageForge() {
   const [manualEditHistory, setManualEditHistory] = useState<string[]>([]);
   const [manualEditHistoryIndex, setManualEditHistoryIndex] = useState(-1);
 
-  const [showHistorySection, setShowHistorySection] = useState(true);
+  const [isHistorySheetOpen, setIsHistorySheetOpen] = useState(false);
 
 
   useEffect(() => {
@@ -99,7 +99,7 @@ export default function ImageForge() {
       console.error("Failed to save image history to localStorage", e);
       let description = "An error occurred while saving image history.";
       if (e instanceof DOMException && e.name === 'QuotaExceededError') {
-        description = `Could not save to image history as browser storage is full, even with a limit of ${MAX_HISTORY_LENGTH} images. Older images are automatically removed to try and make space, but current images may be too large.`;
+        description = `Could not save to image history as browser storage is full. The history is limited to ${MAX_HISTORY_LENGTH} images, but current images may be too large. Older images are automatically removed.`;
       }
       toast({
         variant: "destructive",
@@ -322,6 +322,7 @@ export default function ImageForge() {
     setEditPrompt('');
     setError(null);
     setIsUploadedImage(imageHistory.includes(histImageUrl) && !prompt && !editPrompt);
+    setIsHistorySheetOpen(false); 
   };
 
   const applyCanvasTransformation = (transformation: (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, img: HTMLImageElement) => void) => {
@@ -607,54 +608,17 @@ export default function ImageForge() {
                     <Button variant="outline" onClick={handleReset} className="rounded-lg text-base hover:border-destructive/50 hover:text-destructive">
                       <RotateCcw className="mr-2 h-4 w-4" /> Reset
                     </Button>
+                    {imageHistory.length > 0 && (
+                       <Button onClick={() => setIsHistorySheetOpen(true)} variant="outline" size="lg" className="font-semibold rounded-lg text-base">
+                          <HistoryIcon className="mr-2 h-5 w-5" />
+                          View Image History
+                       </Button>
+                    )}
                   </div>
                 </div>
               )}
             </CardContent>
           </Card>
-        )}
-
-        {imageHistory.length > 0 && !isManualEditingOpen && (
-          <>
-            <div className="flex justify-center my-4">
-              <Button onClick={() => setShowHistorySection(!showHistorySection)} variant="outline" size="lg" className="font-semibold">
-                <HistoryIcon className="mr-2 h-5 w-5" />
-                {showHistorySection ? "Hide Image History" : "Show Image History"}
-              </Button>
-            </div>
-            {showHistorySection && (
-              <Card className="shadow-2xl rounded-xl bg-card border-border/50">
-                <CardHeader className="pb-4 pt-6">
-                  <CardTitle className="text-2xl text-center font-semibold">Image History</CardTitle>
-                </CardHeader>
-                <CardContent className="p-6">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                    {imageHistory.map((histImg) => (
-                      <button
-                        key={histImg} 
-                        onClick={() => handleHistoryImageClick(histImg)}
-                        className="aspect-square rounded-lg overflow-hidden border-2 border-transparent hover:border-primary focus:border-primary focus:outline-none shadow-md hover:shadow-lg transition-all duration-200 relative group"
-                        aria-label={`Load image from history`}
-                      >
-                        <NextImage
-                          src={histImg}
-                          alt={`History image`}
-                          layout="fill"
-                          objectFit="cover"
-                          className="transition-transform duration-200 group-hover:scale-105"
-                          data-ai-hint="past image"
-                          unoptimized={histImg.startsWith('data:')}
-                        />
-                        <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center">
-                          <RotateCcw size={24} className="text-white" />
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-          </>
         )}
       </div>
 
@@ -713,6 +677,51 @@ export default function ImageForge() {
             </SheetClose>
             <Button onClick={handleApplyManualChanges}>Apply Changes</Button>
           </SheetFooter>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={isHistorySheetOpen} onOpenChange={setIsHistorySheetOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md md:max-w-lg lg:max-w-xl p-0 flex flex-col">
+          <SheetHeader className="p-4 border-b">
+            <SheetTitle>Image History</SheetTitle>
+            <SheetDescription>
+              Previously generated or edited images. Click an image to load it. Limited to the last {MAX_HISTORY_LENGTH} images due to browser storage.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-grow overflow-y-auto p-6">
+            {imageHistory.length > 0 ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                {imageHistory.map((histImg) => (
+                  <button
+                    key={histImg} 
+                    onClick={() => handleHistoryImageClick(histImg)}
+                    className="aspect-square rounded-lg overflow-hidden border-2 border-transparent hover:border-primary focus:border-primary focus:outline-none shadow-md hover:shadow-lg transition-all duration-200 relative group"
+                    aria-label={`Load image from history`}
+                  >
+                    <NextImage
+                      src={histImg}
+                      alt={`History image`}
+                      layout="fill"
+                      objectFit="cover"
+                      className="transition-transform duration-200 group-hover:scale-105"
+                      data-ai-hint="past image"
+                      unoptimized={histImg.startsWith('data:')}
+                    />
+                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center">
+                      <RotateCcw size={24} className="text-white" />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-center text-muted-foreground mt-10">Your image history is currently empty.</p>
+            )}
+          </div>
+           <SheetFooter className="p-4 border-t mt-auto bg-card">
+             <SheetClose asChild>
+                <Button variant="outline">Close</Button>
+             </SheetClose>
+           </SheetFooter>
         </SheetContent>
       </Sheet>
     </div>
