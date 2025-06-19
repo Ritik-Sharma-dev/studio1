@@ -101,8 +101,9 @@ export default function ImageForge() {
     } catch (e) {
       console.error("Failed to save image history to localStorage", e);
       let description = "An error occurred while saving image history.";
+      // Check if it's a QuotaExceededError
       if (e instanceof DOMException && e.name === 'QuotaExceededError') {
-        description = "Could not save to image history. Storage might be full. Try clearing some history or older items may have been removed.";
+        description = "Could not save to image history. Storage might be full. Older items may have been removed or try clearing some history manually if possible.";
       }
       toast({
         variant: "destructive",
@@ -117,7 +118,7 @@ export default function ImageForge() {
     setImageHistory(prevHistory => {
       const filteredHistory = prevHistory.filter(url => url !== newImageUrl);
       const newHistory = [newImageUrl, ...filteredHistory];
-      return newHistory.slice(0, MAX_HISTORY_LENGTH);
+      return newHistory.slice(0, MAX_HISTORY_LENGTH); // Ensure history doesn't exceed max length
     });
   };
 
@@ -365,6 +366,7 @@ export default function ImageForge() {
             transformation(ctx, canvas, imageWithAdjustments);
             pushToManualEditHistory(canvas.toDataURL());
         }
+        imageWithAdjustments.onerror = () => { console.error("Failed to load imageWithAdjustments for transformation"); }
         imageWithAdjustments.src = tempCanvas.toDataURL(); // This now includes adjustments
     };
     img.onerror = () => { console.error("Failed to load image for transformation"); }
